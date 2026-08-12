@@ -1,98 +1,76 @@
 # 🤖 Job Match Bot
 
-```
-                    +----------------------+
-                    |   Currículo (PDF)    |
-                    +----------+-----------+
-                               |
-                               v
-
-```
-
-+------------------+    +----------------------+    +-----------------------+
-|  LinkedIn Guest  | -> |  LinkedInScraper     | -> |  Evaluator (Gemini)   |
-|  API (24h / RJ)  |    |  (httpx + BS4)       |    |  (Structured JSON)    |
-+------------------+    +----------------------+    +-----------+-----------+
-|
-v
-+------------------+    +----------------------+    +-----------------------+
-|  Telegram Bot    | <- |  Database (SQLite)   | <- |  Match Score >= 80%   |
-|  (Notifier HTML) |    |  (Deduplication)     |    |  (Decision Engine)    |
-+------------------+    +----------------------+    +-----------------------+
-
-```
-
-### Stack Técnica:
-* **Linguagem & Runtime:** Python 3.10+
-* **Inteligência Artificial:** Google GenAI SDK (`gemini-3.5-flash-lite`), Pydantic Schema Validation
-* **Web Scraping & Parsing:** `httpx`, `BeautifulSoup4`, `Playwright`
-* **Banco de Dados:** SQLite3 com `pydantic` / `dataclasses`
-* **Agendamento & Automação:** `APScheduler`
-* **Notificações:** Telegram Bot API (HTML sanitizado via `html.escape`)
-
 ---
 
-## ⚙️ Funcionalidades Principais
+## 🧠 Engenharia de Prompt & Decisões de Arquitetura
 
-* [x] **Parsing Automático de PDF:** Extração do texto do currículo do candidato.
-* [x] **Coleta Filtrada de Vagas:** Integração com a API Guest do LinkedIn aplicando filtros de tempo (24h) e localidade (Remoto/Híbrido).
-* [x] **Análise Aprofundada por IA:** Avaliação de aderência técnica, extração de *matching skills*, *missing skills* e parecer técnico sucinto.
-* [x] **Camada de Persistência:** Gravação histórica das vagas com status `APPROVED` ou `REJECTED`.
-* [x] **Notificações Instantâneas:** Envio de relatórios visuais no Telegram com link direto para candidatura.
-* [x] **Agendador Diário:** Suporte a execuções automáticas via Cron/APScheduler.
+### 1. Extensibilidade de Scrapers (Adapter Pattern)
+
+A camada de coleta herda de uma classe abstrata `BaseScraper`, permitindo integrar novas plataformas (ex: Gupy, InfoJobs, Catho) padronizando o contrato do dicionário de saída sem alterar o núcleo da aplicação.
+
+### 2. Garantia de Saída Estrita (Pydantic Schema Validation)
+
+Diferente de chamadas puras a LLMs que podem alucinar texto livre, a API do Gemini é configurada com `response_schema=JobEvaluation`. O retorno é parseado e validado estritamente em runtime pelo Pydantic, garantindo tipagem forte nos atributos `match_score`, `matching_skills` e `should_apply`.
+
+### 3. Filtros Rígidos de Negócio no Inferencia Engine
+
+A avaliação pela IA não considera apenas *keywords*. O prompt contém guardrails explícitos:
+
+* **Filtro de Concorrência:** Penalização direta se a descrição indicar volume excessivo de candidatos ($> 50/100$).
+* **Filtro Geográfico/Presencialidade:** Descarte imediato de vagas estritamente presenciais fora do hub do candidato.
+* **Filtro de Senioridade:** Calibragem focada no perfil de atuação do candidato (Júnior/Pleno/Estágio).
 
 ---
 
 ## 🚀 Como Executar o Projeto
 
-### Pró-requisitos
-* Python 3.10 ou superior instalado
-* Chave de API do Google Gemini (`GEMINI_API_KEY`)
-* Token de Bot e Chat ID do Telegram (para alertas)
+### Pré-requisitos
 
-### 1. Clonar o Repositório e Criar Ambiente Virtual
+* Python 3.10+
+* Chave de API do **Google Gemini**
+* Token de Bot e Chat ID do **Telegram**
+
+### Setup Rápido
+
 ```bash
+# 1. Clonar o repositório
 git clone [https://github.com/DBCBR/job-match-bot.git](https://github.com/DBCBR/job-match-bot.git)
 cd job-match-bot
 
+# 2. Criar e ativar ambiente virtual
 python -m venv .venv
-# No Windows PowerShell:
-.\.venv\Scripts\Activate.ps1
+source .venv/bin/activate  # No Windows: .\.venv\Scripts\Activate.ps1
 
-```
-
-### 2. Instalar Dependências
-
-```bash
+# 3. Instalar dependências
 pip install -r requirements.txt
 
 ```
 
-### 3. Configurar Variáveis de Ambiente
+### Configuração do `.env`
 
-Crie um arquivo `.env` na raiz do projeto contendo:
+Crie um arquivo `.env` na raiz do projeto:
 
 ```env
-GEMINI_API_KEY=sua_gemini_api_key
-TELEGRAM_BOT_TOKEN=seu_bot_token
-TELEGRAM_CHAT_ID=seu_chat_id
+GEMINI_API_KEY=sua_chave_gemini_aqui
+TELEGRAM_BOT_TOKEN=seu_bot_token_aqui
+TELEGRAM_CHAT_ID=seu_chat_id_aqui
 LOG_LEVEL=INFO
 MIN_MATCH_SCORE=80
 
 ```
 
-Adicione seu currículo em formato PDF no caminho: `data/cv.pdf`.
+> **Nota:** Certifique-se de posicionar o arquivo do seu currículo em `data/cv.pdf`.
 
-### 4. Executar a Aplicação
+### Execução
 
-**Modo Manual (Varredura Imadiata):**
+* **Execução Sob Demanda (Pipeline Manual):**
 
 ```bash
 python -m src.main
 
 ```
 
-**Modo Agendado (Rotina Diária):**
+* **Execução Agendada (Serviço Background via APScheduler):**
 
 ```bash
 python -m src.scheduler
@@ -101,30 +79,30 @@ python -m src.scheduler
 
 ---
 
-## 📊 Estrutura do Repositório
+## 📁 Estrutura do Repositório
 
 ```text
 job-match-bot/
 ├── data/
-│   ├── cv.pdf               # Currículo do candidato
-│   └── jobs.db              # Banco SQLite de vagas
+│   ├── cv.pdf               # Currículo base do candidato
+│   └── jobs.db              # Banco SQLite de persistência histórica
 ├── src/
-│   ├── config.py            # Validação de ambiente (Pydantic Settings)
+│   ├── config.py            # Gestão centralizada de configurações (Pydantic Settings)
 │   ├── evaluator/
-│   │   ├── matcher.py       # Integração com Gemini API e Prompts de IA
-│   │   └── pdf_reader.py    # Extrator de texto de PDF
+│   │   ├── matcher.py       # Avaliador de IA com Gemini API e Structured Outputs
+│   │   └── pdf_reader.py    # Módulo de extração e higienização de texto de PDF
 │   ├── notifier/
-│   │   └── telegram.py      # Notificador Telegram via Webhook/API
+│   │   └── telegram.py      # Notificador Telegram com sanitização HTML
 │   ├── scrapers/
-│   │   ├── base.py          # Classe base abstrata (BaseScraper)
-│   │   └── linkedin_scraper.py # Scraper da API pública do LinkedIn
+│   │   ├── base.py          # Interface/Classe abstrata para scrapers
+│   │   └── linkedin_scraper.py # Extrator para a Guest API do LinkedIn
 │   ├── storage/
-│   │   └── database.py      # Camada DAO/SQLite de desduplicação
-│   ├── main.py              # Pipeline principal (Execução sob demanda)
-│   └── scheduler.py         # Agendador de tarefas diárias
-├── .env.example             # Modelo de variáveis de ambiente
-├── requirements.txt         # Dependências do projeto
-└── README.md                # Documentação técnica
+│   │   └── database.py      # Camada DAO para desduplicação e SQLite
+│   ├── main.py              # Orquestrador assíncrono principal
+│   └── scheduler.py         # Agendador de tarefas recorrentes (APScheduler)
+├── .env.example             # Template das variáveis de ambiente
+├── requirements.txt         # Grafo de dependências do projeto
+└── README.md                # Documentação técnica do projeto
 
 ```
 
@@ -134,5 +112,11 @@ job-match-bot/
 
 **David Barcellos Cardoso**
 
+*Desenvolvedor Python & Backend | Automação, GenAI & Engenharia de Software*
+
 * **LinkedIn:** [linkedin.com/in/david-barcellos-cardoso](https://www.google.com/search?q=https://linkedin.com/in/david-barcellos-cardoso/)
 * **GitHub:** [github.com/DBCBR](https://www.google.com/search?q=https://github.com/DBCBR)
+
+```
+
+```
